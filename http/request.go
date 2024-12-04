@@ -6,12 +6,18 @@ import (
 )
 
 type Request struct {
-	Method  string
-	URI     string
-	Headers map[string]string
+	Method      string
+	URI         string
+	Headers     map[string]string
+	QueryParams map[string]string
+	PathParams  map[string]string
 }
 
 const CRLF = "\r\n"
+
+func sanitize(s string) string {
+	return strings.TrimSpace(strings.ReplaceAll(s, CRLF, ""))
+}
 
 func getHeaderEnd(header string) int {
 
@@ -24,29 +30,44 @@ func getHeaderEnd(header string) int {
 	return len(header) - 1
 }
 
-func extractURI(uri string) string {
+func parseURI(uri string) (string, map[string]string) {
 	paramsIdx := strings.Index(uri, "?")
 
+	params := make(map[string]string)
+
 	if paramsIdx < 0 {
-		paramsIdx = len(uri)
+		return sanitize(uri), nil
 	}
 
-	return uri[:paramsIdx]
+	paramsStr := uri[paramsIdx+1:]
+
+	for _, p := range strings.Split(paramsStr, "&") {
+		kv := strings.Split(p, "=")
+		params[sanitize(kv[0])] = sanitize(kv[1])
+	}
+
+	return sanitize(uri[:paramsIdx]), params
 }
 
-func parseRequestLine(requestLine string) (err error, method, path, ptcl string) {
+func parseRequestLine(requestLine string) (err error, method, path, ptcl string, params map[string]string) {
 	rl := strings.Split(requestLine, " ")
 
-	uri := extractURI(rl[1])
+	method = rl[0]
+	uri := rl[1]
+	ptcl = rl[2]
+	params = make(map[string]string)
+
+	path, params = parseURI(uri)
 
 	if len(rl) == 3 {
-		return nil, rl[0], uri, rl[2]
+		return nil, method, path, ptcl, params
 	}
-	return errors.New("malformed request line"), "", "", ""
+
+	return errors.New("malformed request line"), "", "", "", nil
 }
 
 func getHeaderValue(header string) string {
-	return strings.TrimSpace(strings.ReplaceAll(header, CRLF, ""))
+	return sanitize(header)
 }
 
 func parseHeader(h string) map[string]string {
@@ -66,11 +87,23 @@ func parseHeader(h string) map[string]string {
 	return headers
 }
 
+func (r *Request) ParsePathParams(routeUri []string) {
+	r.PathParams = make(map[string]string)
+	listURI := strings.Split(r.URI, "/")
+	for i, part := range routeUri {
+		if part != "" && part[0] == '{' {
+			key := part[1 : len(part)-1]
+			r.PathParams[key] = listURI[i]
+		}
+	}
+
+}
+
 func ParseRequest(r string) *Request {
 	reqLineIdx := strings.Index(r, CRLF)
 	headerEndIdx := getHeaderEnd(r)
 
-	err, method, path, ptcl := parseRequestLine(r[:reqLineIdx])
+	err, method, path, ptcl, params := parseRequestLine(r[:reqLineIdx])
 
 	if err != nil || ptcl != "HTTP/1.1" {
 		return nil
@@ -78,11 +111,23 @@ func ParseRequest(r string) *Request {
 
 	header := parseHeader(r[reqLineIdx+2 : headerEndIdx])
 
-	http := Request{
-		Method:  method,
-		URI:     path,
-		Headers: header,
+	request := Request{
+		Method:      method,
+		URI:         path,
+		Headers:     header,
+		QueryParams: params,
 	}
 
-	return &http
+	return &request
+}
+
+func (r *Request) GetPathValue(key string) string {
+
+	value, ok := r.PathParams[key]
+
+	if ok {
+		return value
+	}
+
+	return ""
 }

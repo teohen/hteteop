@@ -8,15 +8,14 @@ import (
 )
 
 func handler(r http.Request) {
-	fmt.Println("Request to: ", r.URI)
-	fmt.Println("Request method: ", r.Method)
-	fmt.Println("Request Headers: ", r.Headers)
+	fmt.Println("path value sent to route: ",
+		r.GetPathValue("id"))
 }
 
 func main() {
 	s := http.New()
 
-	s.Reg("/users", handler)
+	s.Reg("/users/{id}", handler)
 
 	err := s.Listen(8080)
 
